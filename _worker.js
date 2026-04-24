@@ -1,6 +1,7 @@
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request))
 })
+
 async function handleRequest(request) {
   const B2_KEY_ID = "d01d287e4558";
   const B2_APP_KEY = "005d1ab15027fb133ff7b3abcbb3f0962950928081";
@@ -10,9 +11,11 @@ async function handleRequest(request) {
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     "Access-Control-Allow-Headers": "*"
   };
+
   if (request.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
   const url = new URL(request.url);
   const path = url.pathname;
 
@@ -80,7 +83,8 @@ async function handleRequest(request) {
         fileCount: fileList.length,
         files: fileList
       }, null, 2), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
     } catch (err) {
       return new Response(JSON.stringify({
         error: "列表获取失败",
@@ -90,13 +94,17 @@ async function handleRequest(request) {
     }
   }
 
-  // ===================== 【纯新增：上传接口】 =====================
+  // ===================== 【修正后的上传接口】 =====================
   if (path === "/upload" && request.method === "POST") {
     try {
       const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
         headers: { "Authorization": `Basic ${btoa(B2_KEY_ID + ":" + B2_APP_KEY)}` }
       });
+      if (!authRes.ok) {
+        return new Response(JSON.stringify({ code: 401, msg: "B2授权失败" }), { status: 401, headers: corsHeaders });
+      }
       const authData = await authRes.json();
+
       const listBucketsRes = await fetch(`${authData.apiUrl}/b2api/v2/b2_list_buckets`, {
         method: "POST",
         headers: { Authorization: authData.authorizationToken, "Content-Type": "application/json" },
@@ -104,32 +112,43 @@ async function handleRequest(request) {
       });
       const buckets = await listBucketsRes.json();
       const bucket = buckets.buckets.find(b => b.bucketName === B2_BUCKET_NAME);
+      if (!bucket) {
+        return new Response(JSON.stringify({ code: 404, msg: "B2桶不存在" }), { status: 404, headers: corsHeaders });
+      }
+
       const uploadInfo = await fetch(`${authData.apiUrl}/b2api/v2/b2_get_upload_url`, {
         method: "POST",
         headers: { Authorization: authData.authorizationToken, "Content-Type": "application/json" },
         body: JSON.stringify({ bucketId: bucket.bucketId })
       });
+      if (!uploadInfo.ok) {
+        return new Response(JSON.stringify({ code: 500, msg: "获取上传地址失败" }), { status: 500, headers: corsHeaders });
+      }
       const uploadData = await uploadInfo.json();
+
       const formData = await request.formData();
       const file = formData.get("file");
-      if (!file) return new Response(JSON.stringify({ code: 400, msg: "no file" }), { status: 400 });
+      if (!file) return new Response(JSON.stringify({ code: 400, msg: "no file" }), { status: 400, headers: corsHeaders });
+
       const ext = file.name.split(".").pop();
-      
-      // ===================== ✅ 只改这里：删掉 chat/ =====================
       const filename = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-      // ===================================================================
-      
+
       const upResp = await fetch(uploadData.uploadUrl, {
         method: "POST",
         headers: {
           Authorization: uploadData.authorizationToken,
-          "X-Bz-File-Name": encodeURIComponent(filename),
+          "X-Bz-File-Name": filename,
           "Content-Type": file.type,
           "X-Bz-Content-Sha1": "do_not_verify"
         },
         body: file.stream()
       });
-      if (!upResp.ok) throw new Error("upload fail");
+
+      if (!upResp.ok) {
+        const err = await upResp.text();
+        return new Response(JSON.stringify({ code: 500, msg: "upload fail", detail: err }), { status: 500, headers: corsHeaders });
+      }
+
       return new Response(JSON.stringify({
         code: 200,
         url: "https://b.im6.qzz.io/" + filename
@@ -138,7 +157,7 @@ async function handleRequest(request) {
       return new Response(JSON.stringify({ code: 500, msg: e.message }), { status: 500, headers: corsHeaders });
     }
   }
-  // ===================== 【新增结束】 =====================
+  // ===================== 【上传接口修正结束】 =====================
 
   // 3. 文件访问（图片/视频/下载）【纯新增：预览+播放头，不改动原有】
   try {
