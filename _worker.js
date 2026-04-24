@@ -21,7 +21,57 @@ async function handleRequest(request) {
   const url = new URL(request.url);
   const path = url.pathname;
 
-  // 处理 /upload 上传接口
+  // 1. 文件列表接口
+  if (path === '/') {
+    try {
+      // 1. 授权B2
+      const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
+        headers: {
+          "Authorization": `Basic ${btoa(`${B2_KEY_ID}:${B2_APP_KEY}`)}`
+        }
+      });
+      if (!authRes.ok) throw new Error("授权失败");
+      const authData = await authRes.json();
+
+      // 2. 列出文件
+      const listRes = await fetch(`${authData.apiUrl}/b2api/v2/b2_list_file_names`, {
+        method: 'POST',
+        headers: {
+          "Authorization": authData.authorizationToken,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          bucketId: authData.allowed.bucketId,
+          maxFileCount: 1000
+        })
+      });
+      if (!listRes.ok) throw new Error("列出文件失败");
+      const listData = await listRes.json();
+
+      // 3. 格式化文件列表
+      const files = listData.files
+        .filter(f => !f.action || f.action === "upload")
+        .map(f => ({
+          name: f.fileName,
+          size: f.size,
+          url: `https://b.im6.qzz.io/${f.fileName}`
+        }));
+
+      return new Response(JSON.stringify(files, null, 2), {
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders
+        }
+      });
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+      });
+    }
+  }
+
+  // 2. 上传接口
   if (path === '/upload') {
     if (request.method !== 'POST') {
       return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
@@ -33,154 +83,80 @@ async function handleRequest(request) {
           "Authorization": `Basic ${btoa(`${B2_KEY_ID}:${B2_APP_KEY}`)}`
         }
       });
-      if (!authRes.ok) {
-        return Response.json({ code: 401, msg: 'B2授权失败' }, { headers: corsHeaders });
-      }
+      if (!authRes.ok) throw new Error("授权失败");
       const authData = await authRes.json();
-      const apiUrl = authData.apiUrl;
-      const downloadUrl = authData.downloadUrl;
-      const authToken = authData.authorizationToken;
 
       // 2. 获取上传地址
-      const uploadUrlRes = await fetch(`${apiUrl}/b2api/v2/b2_get_upload_url`, {
+      const uploadRes = await fetch(`${authData.apiUrl}/b2api/v2/b2_get_upload_url`, {
         method: 'POST',
-        headers: { 
-          "Authorization": authToken,
+        headers: {
+          "Authorization": authData.authorizationToken,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ bucketId: authData.bucketId })
+        body: JSON.stringify({ bucketId: authData.allowed.bucketId })
       });
-      if (!uploadUrlRes.ok) {
-        return Response.json({ code: 500, msg: '获取上传地址失败' }, { headers: corsHeaders });
-      }
-      const uploadData = await uploadUrlRes.json();
-      const uploadUrl = uploadData.uploadUrl;
-      const uploadAuthToken = uploadData.authorizationToken;
+      if (!uploadRes.ok) throw new Error("获取上传地址失败");
+      const uploadData = await uploadRes.json();
 
-      // 3. 解析上传的文件
+      // 3. 解析文件
       const formData = await request.formData();
       const file = formData.get('file');
-      if (!file) {
-        return Response.json({ code: 400, msg: '未找到上传的文件' }, { headers: corsHeaders });
-      }
+      if (!file) throw new Error("未找到文件");
 
-      // 4. 生成唯一文件名
+      // 4. 生成文件名
       const ext = file.name.split('.').pop();
       const fileName = `uploads/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
 
       // 5. 上传到B2
-      const uploadRes = await fetch(uploadUrl, {
+      const uploadFileRes = await fetch(uploadData.uploadUrl, {
         method: 'POST',
         headers: {
-          "Authorization": uploadAuthToken,
+          "Authorization": uploadData.authorizationToken,
           "X-Bz-File-Name": encodeURIComponent(fileName),
           "Content-Type": file.type,
           "X-Bz-Content-Sha1": "do_not_verify"
         },
         body: file.stream()
       });
+      if (!uploadFileRes.ok) throw new Error("上传失败");
 
-      if (!uploadRes.ok) {
-        const err = await uploadRes.text();
-        return Response.json({ code: 500, msg: 'B2上传失败: ' + err }, { headers: corsHeaders });
-      }
-
-      // 6. 返回文件URL
-      const fileUrl = `https://b.im6.qzz.io/${fileName}`;
-      return Response.json({
+      // 6. 返回结果
+      return new Response(JSON.stringify({
         code: 200,
-        data: { url: fileUrl }
-      }, { headers: corsHeaders });
-
+        data: { url: `https://b.im6.qzz.io/${fileName}` }
+      }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
     } catch (err) {
-      return Response.json({
-        code: 500,
-        msg: '服务器错误: ' + err.message
-      }, { headers: corsHeaders });
-    }
-  }
-
-  // 根路径返回文件列表
-  if (path === '/') {
-    try {
-      const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
-        headers: {
-          "Authorization": `Basic ${btoa(`${B2_KEY_ID}:${B2_APP_KEY}`)}`
-        }
-      });
-      if (!authRes.ok) {
-        return new Response('B2授权失败', { status: 500 });
-      }
-      const authData = await authRes.json();
-      const apiUrl = authData.apiUrl;
-      const authToken = authData.authorizationToken;
-
-      const listRes = await fetch(`${apiUrl}/b2api/v2/b2_list_file_names`, {
-        method: 'POST',
-        headers: { 
-          Authorization: authToken, 
-          'Content-Type': 'application/json' 
-        },
-        body: JSON.stringify({ 
-          bucketId: authData.bucketId, 
-          maxFileCount: 1000,
-          prefix: ""
-        })
-      });
-
-      const listData = await listRes.json();
-      const files = (listData.files || []).filter(f => !f.action).map(item => ({
-        name: item.fileName,
-        size: item.size,
-        url: `https://b.im6.qzz.io/${item.fileName}`
-      }));
-
-      return new Response(JSON.stringify(files, null, 2), {
+      return new Response(JSON.stringify({ code: 500, msg: err.message }), {
+        status: 500,
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
-    } catch (err) {
-      return Response.json({ code: 500, msg: '获取文件列表失败: ' + err.message }, { headers: corsHeaders });
     }
   }
 
-  // 访问文件
+  // 3. 文件访问接口
   try {
     const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
       headers: {
         "Authorization": `Basic ${btoa(`${B2_KEY_ID}:${B2_APP_KEY}`)}`
       }
     });
-
-    if (!authRes.ok) {
-      return new Response(`B2授权错误: ${authRes.status}`, { status: 500 });
-    }
-
+    if (!authRes.ok) throw new Error("授权失败");
     const authData = await authRes.json();
-    const downloadUrl = authData.downloadUrl;
+
     const filePath = path.slice(1);
-
-    if (!filePath) {
-      return new Response("请输入文件名", { status: 400 });
-    }
-
-    const fileUrl = `${downloadUrl}${B2_FILES_URL_PREFIX}${filePath}`;
+    const fileUrl = `${authData.downloadUrl}${B2_FILES_URL_PREFIX}${filePath}`;
     const fileRes = await fetch(fileUrl, {
-      headers: { Authorization: authData.authorizationToken }
+      headers: { "Authorization": authData.authorizationToken }
     });
 
     if (!fileRes.ok) {
-      return new Response("文件未找到", { status: 404 });
+      return new Response("Not Found", { status: 404 });
     }
 
     const headers = new Headers(fileRes.headers);
     headers.set("Access-Control-Allow-Origin", "*");
-
-    return new Response(fileRes.body, {
-      status: fileRes.status,
-      headers: headers
-    });
-
-  } catch (error) {
-    return new Response(`服务器错误: ${error.message}`, { status: 500 });
+    return new Response(fileRes.body, { status: fileRes.status, headers });
+  } catch (err) {
+    return new Response("Error: " + err.message, { status: 500 });
   }
 }
