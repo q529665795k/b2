@@ -15,10 +15,10 @@ async function handleRequest(request) {
   }
   const url = new URL(request.url);
   const path = url.pathname;
+
   // 1. 根目录：参数拉满的文件列表
   if (path === "/") {
     try {
-      // 第一步：授权
       const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
         headers: { "Authorization": `Basic ${btoa(B2_KEY_ID + ":" + B2_APP_KEY)}` }
       });
@@ -30,7 +30,6 @@ async function handleRequest(request) {
         }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       const authData = await authRes.json();
-      // 第二步：获取桶ID
       const listBucketsRes = await fetch(`${authData.apiUrl}/b2api/v2/b2_list_buckets`, {
         method: "POST",
         headers: {
@@ -44,7 +43,6 @@ async function handleRequest(request) {
       if (!bucket) {
         return new Response(JSON.stringify({ error: "桶不存在" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      // 第三步：参数拉满调用列表接口
       const listRes = await fetch(`${authData.apiUrl}/b2api/v2/b2_list_file_names`, {
         method: "POST",
         headers: {
@@ -68,7 +66,6 @@ async function handleRequest(request) {
         }), { status: listRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       const listJson = await listRes.json();
-      // 第四步：格式化
       const fileList = listJson.files
         .filter(item => item.action === "upload")
         .map(item => ({
@@ -117,7 +114,11 @@ async function handleRequest(request) {
       const file = formData.get("file");
       if (!file) return new Response(JSON.stringify({ code: 400, msg: "no file" }), { status: 400 });
       const ext = file.name.split(".").pop();
-      const filename = `chat/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+      
+      // ===================== ✅ 只改这里：删掉 chat/ =====================
+      const filename = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+      // ===================================================================
+      
       const upResp = await fetch(uploadData.uploadUrl, {
         method: "POST",
         headers: {
