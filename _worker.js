@@ -21,8 +21,10 @@ async function handleRequest(request) {
   const url = new URL(request.url);
   const path = url.pathname;
 
+  // 上传图片/视频
   if (request.method === 'POST' && path === '/upload') {
     try {
+      // 每次上传都重新授权，自动刷新令牌
       const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
         headers: {
           "Authorization": `Basic ${btoa(`${B2_KEY_ID}:${B2_APP_KEY}`)}`
@@ -85,8 +87,10 @@ async function handleRequest(request) {
     }
   }
 
+  // 访问根域名，列出所有文件
   if (path === '/') {
     try {
+      // 每次列文件都重新授权，自动刷新令牌
       const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
         headers: {
           "Authorization": `Basic ${btoa(`${B2_KEY_ID}:${B2_APP_KEY}`)}`
@@ -120,7 +124,9 @@ async function handleRequest(request) {
     }
   }
 
+  // 访问图片/视频文件
   try {
+    // 每次访问文件都重新授权，自动刷新令牌
     const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
       headers: {
         "Authorization": `Basic ${btoa(`${B2_KEY_ID}:${B2_APP_KEY}`)}`
