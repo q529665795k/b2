@@ -21,44 +21,55 @@ async function handleRequest(request) {
   const url = new URL(request.url);
   const path = url.pathname;
 
-  // 上传图片/视频
-  if (request.method === 'POST' && path === '/upload') {
+  // 处理 /upload 上传接口
+  if (path === '/upload') {
+    if (request.method !== 'POST') {
+      return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
+    }
     try {
-      // 每次上传都重新授权，自动刷新令牌
+      // 1. 授权B2
       const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
         headers: {
           "Authorization": `Basic ${btoa(`${B2_KEY_ID}:${B2_APP_KEY}`)}`
         }
       });
       if (!authRes.ok) {
-        return Response.json({ code: 401, msg: 'auth failed' }, { headers: corsHeaders });
+        return Response.json({ code: 401, msg: 'B2授权失败' }, { headers: corsHeaders });
       }
       const authData = await authRes.json();
-      const uploadUrl = authData.upAuthUrl;
-      const uploadToken = authData.authorizationToken;
+      const apiUrl = authData.apiUrl;
+      const downloadUrl = authData.downloadUrl;
+      const authToken = authData.authorizationToken;
 
-      const bucketRes = await fetch(`${uploadUrl}/b2api/v2/b2_get_upload_url`, {
+      // 2. 获取上传地址
+      const uploadUrlRes = await fetch(`${apiUrl}/b2api/v2/b2_get_upload_url`, {
         method: 'POST',
-        headers: { "Authorization": uploadToken },
+        headers: { 
+          "Authorization": authToken,
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify({ bucketId: authData.bucketId })
       });
-      if (!bucketRes.ok) {
-        return Response.json({ code: 500, msg: 'get upload url failed' }, { headers: corsHeaders });
+      if (!uploadUrlRes.ok) {
+        return Response.json({ code: 500, msg: '获取上传地址失败' }, { headers: corsHeaders });
       }
-      const uploadData = await bucketRes.json();
-      const uploadUrlFinal = uploadData.uploadUrl;
+      const uploadData = await uploadUrlRes.json();
+      const uploadUrl = uploadData.uploadUrl;
       const uploadAuthToken = uploadData.authorizationToken;
 
+      // 3. 解析上传的文件
       const formData = await request.formData();
       const file = formData.get('file');
       if (!file) {
-        return Response.json({ code: 400, msg: 'no file' }, { headers: corsHeaders });
+        return Response.json({ code: 400, msg: '未找到上传的文件' }, { headers: corsHeaders });
       }
 
+      // 4. 生成唯一文件名
       const ext = file.name.split('.').pop();
       const fileName = `uploads/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
 
-      const uploadResponse = await fetch(uploadUrlFinal, {
+      // 5. 上传到B2
+      const uploadRes = await fetch(uploadUrl, {
         method: 'POST',
         headers: {
           "Authorization": uploadAuthToken,
@@ -69,10 +80,12 @@ async function handleRequest(request) {
         body: file.stream()
       });
 
-      if (!uploadResponse.ok) {
-        return Response.json({ code: 500, msg: 'upload failed' }, { headers: corsHeaders });
+      if (!uploadRes.ok) {
+        const err = await uploadRes.text();
+        return Response.json({ code: 500, msg: 'B2上传失败: ' + err }, { headers: corsHeaders });
       }
 
+      // 6. 返回文件URL
       const fileUrl = `https://b.im6.qzz.io/${fileName}`;
       return Response.json({
         code: 200,
@@ -82,22 +95,21 @@ async function handleRequest(request) {
     } catch (err) {
       return Response.json({
         code: 500,
-        msg: 'error: ' + err.message
+        msg: '服务器错误: ' + err.message
       }, { headers: corsHeaders });
     }
   }
 
-  // 访问根域名，列出所有文件
+  // 根路径返回文件列表
   if (path === '/') {
     try {
-      // 每次列文件都重新授权，自动刷新令牌
       const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
         headers: {
           "Authorization": `Basic ${btoa(`${B2_KEY_ID}:${B2_APP_KEY}`)}`
         }
       });
       if (!authRes.ok) {
-        return new Response('auth failed', { status: 500 });
+        return new Response('B2授权失败', { status: 500 });
       }
       const authData = await authRes.json();
       const apiUrl = authData.apiUrl;
@@ -105,28 +117,34 @@ async function handleRequest(request) {
 
       const listRes = await fetch(`${apiUrl}/b2api/v2/b2_list_file_names`, {
         method: 'POST',
-        headers: { Authorization: authToken },
-        body: JSON.stringify({ bucketId: authData.bucketId, maxFileCount: 1000 })
+        headers: { 
+          Authorization: authToken, 
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({ 
+          bucketId: authData.bucketId, 
+          maxFileCount: 1000,
+          prefix: ""
+        })
       });
 
       const listData = await listRes.json();
-      const files = (listData.files || []).map(item => ({
+      const files = (listData.files || []).filter(f => !f.action).map(item => ({
         name: item.fileName,
         size: item.size,
-        url: 'https://b.im6.qzz.io/' + item.fileName
+        url: `https://b.im6.qzz.io/${item.fileName}`
       }));
 
       return new Response(JSON.stringify(files, null, 2), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
       });
     } catch (err) {
-      return Response.json({ code: 500, msg: 'list failed' }, { headers: corsHeaders });
+      return Response.json({ code: 500, msg: '获取文件列表失败: ' + err.message }, { headers: corsHeaders });
     }
   }
 
-  // 访问图片/视频文件
+  // 访问文件
   try {
-    // 每次访问文件都重新授权，自动刷新令牌
     const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
       headers: {
         "Authorization": `Basic ${btoa(`${B2_KEY_ID}:${B2_APP_KEY}`)}`
@@ -134,8 +152,7 @@ async function handleRequest(request) {
     });
 
     if (!authRes.ok) {
-      const err = await authRes.text();
-      return new Response(`auth error: ${authRes.status}`, { status: 500 });
+      return new Response(`B2授权错误: ${authRes.status}`, { status: 500 });
     }
 
     const authData = await authRes.json();
@@ -143,7 +160,7 @@ async function handleRequest(request) {
     const filePath = path.slice(1);
 
     if (!filePath) {
-      return new Response("input filename", { status: 400 });
+      return new Response("请输入文件名", { status: 400 });
     }
 
     const fileUrl = `${downloadUrl}${B2_FILES_URL_PREFIX}${filePath}`;
@@ -152,7 +169,7 @@ async function handleRequest(request) {
     });
 
     if (!fileRes.ok) {
-      return new Response("not found", { status: 404 });
+      return new Response("文件未找到", { status: 404 });
     }
 
     const headers = new Headers(fileRes.headers);
@@ -164,6 +181,6 @@ async function handleRequest(request) {
     });
 
   } catch (error) {
-    return new Response(`error: ${error.message}`, { status: 500 });
+    return new Response(`服务器错误: ${error.message}`, { status: 500 });
   }
 }
