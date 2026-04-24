@@ -2,7 +2,7 @@ export default {
   async fetch(request) {
     const B2_KEY_ID = "005d01d287e45580000000001";
     const B2_APP_KEY = "K00503xO0gW8T+ZL1v3ylTjzNnQEOpl";
-    const B2_BUCKET = "529665795";
+    const B2_BUCKET = "fdd071ad9288b7be94d50518";
     const B2_HOST = "s3.us-east-005.backblazeb2.com";
 
     let token = null, expire = 0;
