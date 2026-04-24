@@ -3,15 +3,15 @@ addEventListener('fetch', event => {
 })
 
 async function handleRequest(request) {
-  const B2_KEY_ID = "005d01d287e45580000000002";
-  const B2_APP_KEY = "K005g6VFAhOkO4Owc25zP6vDw+xZlNk";
+  // 你刚生成的主密钥（全权限，直接写死在里面了）
+  const B2_KEY_ID = "d01d287e4558";
+  const B2_APP_KEY = "005d1ab15027fb133ff7b3abcbb3f0962950928081";
   const B2_BUCKET_NAME = "529665795";
 
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "*",
-    "Access-Control-Expose-Headers": "*"
+    "Access-Control-Allow-Headers": "*"
   };
 
   if (request.method === "OPTIONS") {
@@ -21,7 +21,7 @@ async function handleRequest(request) {
   const url = new URL(request.url);
   const path = url.pathname;
 
-  // 1. 根目录 = 列出全部文件
+  // 1. 根目录：列出文件（方便你测试）
   if (path === "/") {
     try {
       const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
@@ -42,13 +42,12 @@ async function handleRequest(request) {
           maxFileCount: 2000
         })
       });
-
       const listJson = await listRes.json();
+
       const fileList = listJson.files
         .filter(item => item.action === "upload")
         .map(item => ({
           name: item.fileName,
-          size: item.size,
           url: `https://b.im6.qzz.io/${item.fileName}`
         }));
 
@@ -56,17 +55,15 @@ async function handleRequest(request) {
         headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     } catch (err) {
-      return new Response(JSON.stringify({error:"列表获取失败"}), {
-        status:500, headers:{...corsHeaders,"Content-Type":"application/json"}
+      return new Response(JSON.stringify({ error: "列表获取失败", msg: err.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
   }
 
-  // 2. /upload 上传接口 （图片、视频都能传）
-  if (path === "/upload") {
-    if (request.method !== "POST") {
-      return new Response("Method Not Allowed", {status:405, headers:corsHeaders});
-    }
+  // 2. /upload 上传接口（图片、视频都能传）
+  if (path === "/upload" && request.method === "POST") {
     try {
       const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
         headers: {
@@ -82,14 +79,14 @@ async function handleRequest(request) {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ bucketId: authData.allowed.bucketId })
-      }).then(r=>r.json());
+      }).then(r => r.json());
 
       const formData = await request.formData();
       const file = formData.get("file");
-      if(!file) throw new Error("无文件");
+      if (!file) throw new Error("无文件");
 
       const suffix = file.name.split(".").pop();
-      const newName = `media/${Date.now()}_147157.${suffix}`;
+      const newName = `chat/${Date.now()}_${Math.random().toString(36).slice(2)}.${suffix}`;
 
       const upRes = await fetch(uploadInfo.uploadUrl, {
         method: "POST",
@@ -102,23 +99,22 @@ async function handleRequest(request) {
         body: file.stream()
       });
 
-      if(!upRes.ok) throw new Error("上传失败");
+      if (!upRes.ok) throw new Error("上传失败");
 
       return new Response(JSON.stringify({
-        code:200,
-        url:`https://b.im6.qzz.io/${newName}`
-      }),{
-        headers:{...corsHeaders,"Content-Type":"application/json"}
-      });
+        code: 200,
+        url: `https://b.im6.qzz.io/${newName}`
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
     } catch (e) {
-      return new Response(JSON.stringify({code:500,msg:e.message}),{
-        status:500,headers:{...corsHeaders,"Content-Type":"application/json"}
+      return new Response(JSON.stringify({ code: 500, msg: e.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
   }
 
-  // 3. 正常访问文件：图片显示、视频播放、下载
+  // 3. 图片/视频/下载/播放
   try {
     const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
       headers: {
@@ -138,8 +134,7 @@ async function handleRequest(request) {
     });
 
     const outHeaders = new Headers(fileResp.headers);
-    outHeaders.set("Access-Control-Allow-Origin","*");
-    outHeaders.set("Access-Control-Allow-Methods","GET,OPTIONS");
+    outHeaders.set("Access-Control-Allow-Origin", "*");
     outHeaders.delete("x-bz-info");
 
     return new Response(fileResp.body, {
@@ -148,6 +143,6 @@ async function handleRequest(request) {
     });
 
   } catch (err) {
-    return new Response("文件访问异常",{status:500});
+    return new Response("文件访问异常: " + err.message, { status: 500 });
   }
 }
