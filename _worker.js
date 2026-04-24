@@ -6,7 +6,7 @@ async function handleRequest(request) {
   // 你的 B2 主密钥信息（已填好）
   const B2_KEY_ID = "d01d287e4558";
   const B2_APP_KEY = "00557079826347b81e65bfd787f92cf550b3079c45";
-  const B2_BUCKET_ID = "fdd071ad9288b7be94d50518";
+  const B2_BUCKET_ID = "529665795";
   const B2_FILES_URL_PREFIX = `/file/${B2_BUCKET_ID}/`;
 
   try {
