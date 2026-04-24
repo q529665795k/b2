@@ -1,47 +1,41 @@
-  export default {
-  async fetch(request, env, ctx) {
-    const B2_ACCOUNT_ID = "529665795";
+export default {
+  async fetch(request) {
     const B2_KEY_ID = "005d01d287e45580000000001";
-    const B2_APP_KEY = "K00503xO0gW8T+ZL1v3ylTj";
-    const B2_BUCKET_NAME = "529665795";
-    const B2_F0_HOST = "f004.backblazeb2.com";
+    const B2_APP_KEY = "K00503xO0gW8T+ZL1v3ylTjzNnQEOpl";
+    const B2_BUCKET = "529665795";
+    const B2_HOST = "s3.us-east-005.backblazeb2.com";
 
-    let cachedAuthToken = null;
-    let tokenExpireTime = 0;
+    let token = null, expire = 0;
 
-    async function getB2AuthToken() {
-      if (cachedAuthToken && Date.now() < tokenExpireTime) {
-        return cachedAuthToken;
-      }
-      const auth = btoa(`${B2_KEY_ID}:${B2_APP_KEY}`);
-      const resp = await fetch(`https://api.backblazeb2.com/b2api/v2/b2_authorize_account`, {
-        headers: { Authorization: `Basic ${auth}` }
+    async function getAuth() {
+      if (token && Date.now() < expire) return token;
+      const res = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
+        headers: { Authorization: "Basic " + btoa(B2_KEY_ID + ":" + B2_APP_KEY) }
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error("B2授权失败，请检查密钥");
-      cachedAuthToken = data.authorizationToken;
-      tokenExpireTime = Date.now() + 6 * 24 * 60 * 60 * 1000;
-      return cachedAuthToken;
+      if (!res.ok) throw new Error("Auth failed");
+      const json = await res.json();
+      token = json.authorizationToken;
+      expire = Date.now() + 518400000;
+      return token;
     }
 
     const url = new URL(request.url);
-    const filePath = url.pathname.slice(1);
-    if (!filePath) {
-      return new Response("请在地址后加文件路径，如 /test.jpg", { status: 400 });
-    }
+    const path = url.pathname.slice(1);
+    if (!path) return new Response("请在地址后加文件路径，如 /test.jpg", {status:400});
+
     try {
-      const token = await getB2AuthToken();
-      const b2FileUrl = `https://${B2_F0_HOST}/file/${B2_BUCKET_NAME}/${filePath}?Authorization=${token}`;
-      const b2Resp = await fetch(b2FileUrl);
-      if (!b2Resp.ok) throw new Error(`B2返回错误码: ${b2Resp.status}`);
-      return new Response(b2Resp.body, {
+      const auth = await getAuth();
+      const target = `https://${B2_HOST}/file/${B2_BUCKET}/${path}`;
+      const res = await fetch(target, {headers: {Authorization: auth}});
+      if (!res.ok) throw new Error("B2 Error:" + res.status);
+      return new Response(res.body, {
         headers: {
-          "Content-Type": b2Resp.headers.get("Content-Type") || "application/octet-stream",
-          "Cache-Control": "public, max-age=86400"
+          "Content-Type": res.headers.get("content-type") || "image/jpeg",
+          "Cache-Control": "max-age=86400"
         }
       });
-    } catch (err) {
-      return new Response(`错误: ${err.message}`, { status: 500 });
+    } catch (e) {
+      return new Response("错误: " + e.message.replace("Auth failed", "B2授权失败，请检查密钥"), {status:500});
     }
   }
 };
