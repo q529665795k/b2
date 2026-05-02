@@ -1,1 +1,80 @@
-1
+export default {
+ async fetch(request, env, ctx) {
+  const B2_KEY_ID = "d01d287e4558";
+  const B2_APP_KEY = "005d1ab15027fb133ff71e4695750781563d76f076d80f087b";
+  const B2_BUCKET_NAME = "529665795";
+  const corsHeaders = {
+   "Access-Control-Allow-Origin": "*",
+   "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+   "Access-Control-Allow-Headers": "*",
+  };
+  if (request.method === "OPTIONS") {
+   return new Response(null, { headers: corsHeaders });
+  }
+  const url = new URL(request.url);
+  const path = url.pathname;
+  if (path === "/" && request.method === "GET") {
+   return new Response(JSON.stringify({ status: "ok", msg: "B2 上传服务运行正常" }), {
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+   });
+  }
+  if (path === "/upload" && request.method === "POST") {
+   try {
+    const file = await request.arrayBuffer();
+    const fileName = url.searchParams.get("name") || Date.now() + "";
+    const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
+     headers: { Authorization: "Basic " + btoa(B2_KEY_ID + ":" + B2_APP_KEY) },
+    });
+    const auth = await authRes.json();
+    const uploadUrl = auth.uploadUrl;
+    const uploadAuthToken = auth.authorizationToken;
+    const uploadRes = await fetch(uploadUrl, {
+     method: "POST",
+     headers: {
+      Authorization: uploadAuthToken,
+      "X-Bz-File-Name": fileName,
+      "X-Bz-Content-Sha1": "do_not_verify",
+      "X-Bz-Bucket-Id": auth.bucketId,
+      "Content-Type": "application/octet-stream",
+     },
+     body: file,
+    });
+    const result = await uploadRes.json();
+    return new Response(JSON.stringify(result), {
+     headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+   } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+     status: 500,
+     headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+   }
+  }
+  if (path === "/list" && request.method === "GET") {
+   try {
+    const authRes = await fetch("https://api.backblazeb2.com/b2api/v2/b2_authorize_account", {
+     headers: { Authorization: "Basic " + btoa(B2_KEY_ID + ":" + B2_APP_KEY) },
+    });
+    const auth = await authRes.json();
+    const listRes = await fetch(auth.apiUrl + "/b2api/v2/b2_list_file_names", {
+     method: "POST",
+     headers: {
+      Authorization: auth.authorizationToken,
+      "Content-Type": "application/json",
+     },
+     body: JSON.stringify({ bucketId: auth.bucketId }),
+    });
+    const result = await listRes.json();
+    return new Response(JSON.stringify(result), {
+     headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+   } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+     status: 500,
+     headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+   }
+  }
+  return new Response("Not Found", { status: 404, headers: corsHeaders });
+ },
+};
