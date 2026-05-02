@@ -1,3 +1,0 @@
-name = "b2-media-proxy"
-main = "_worker.js"
-compatibility_date = "2026-04-24"
