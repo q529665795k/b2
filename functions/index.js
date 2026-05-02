@@ -1,4 +1,4 @@
-export default {
+ export default {
   async fetch(request, env, ctx) {
     const B2_KEY_ID = "d01d287e4558";
     const B2_APP_KEY = "005d1ab15027fb133ff7b3abcbb3f0962950928081";
